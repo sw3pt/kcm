@@ -1,0 +1,474 @@
+_is_sourced () {
+  if [ -n "$ZSH_VERSION" ]; then
+    [ "$ZSH_EVAL_CONTEXT" ] && return 0 || return 1
+  fi
+  if [ -n "$BASH_VERSION" ]; then
+    [[ "${BASH_SOURCE[0]}" != "$0" ]] && return 0 || return 1
+  fi
+  case "${0##*/}" in
+    sh|-sh) return 0 ;; # maybe sourced ?
+    *)      return 1 ;;
+  esac
+}
+
+_kcm_helper_set_last_config () {
+  local last_config="$1"
+
+  yq e -i '.last-config = "'"$last_config"'"' $KCM_CONFIG
+
+}
+
+_kcm_helpers_generate_config () {
+  local LAST_CONFIG=$(yq e '.last-config' $KCM_CONFIG)
+
+  if [ "${LAST_CONFIG}" == "null" ] || [ -z "${LAST_CONFIG}" ]; then 
+    local first_config=$(yq e 'configs[0].identifier' $KCM_CONFIG)
+    if [ "${first_config}" == "null" ] || [ -z "${first_config}" ]; then 
+      echo "Error, KCM Config last-config not defined :("
+      return 1
+    fi 
+    _kcm_helper_set_last_config "$first_config"
+  fi
+
+  local namespace=$(yq e '.namespace' $KCM_CONFIG_DIR/defaults/$LAST_CONFIG.yaml 2>/dev/null || echo "default")
+
+  yq e '
+  {
+    "apiVersion": "v1",
+    "kind": "Config",
+    "preferences": {},
+    "contexts": [
+      {
+        "name": "'"$LAST_CONFIG"'",
+        "context": {
+          "cluster": "'"$LAST_CONFIG"'",
+          "user": "'"$LAST_CONFIG"'",
+          "namespace": "'"$namespace"'"
+        }
+      }
+    ],
+    "current-context": "'"$LAST_CONFIG"'"
+    
+  }
+  ' $KCM_CONFIG > $KCM_CONFIG_DIR/contexts/"$TID"
+  return $?
+}
+
+_kcm_helper_require_ocpoauth () {
+  local current_context=$(yq -r '.current-context' "$KCM_CONFIG_DIR/contexts/$TID")
+  local type=$(yq -r '.configs[] | select(.identifier == "'"$current_context"'") | .type' "$KCM_CONFIG")
+
+  if [ ! "${type}" == "OpenShift-OAuth" ]; then
+    echo "Config type $type is not supported for OpenShift OAuth login"
+    return 1
+  fi 
+  return 0
+}
+
+_kcm_setup () {
+  local action="$1"
+  mkdir -p "$KCM_CONFIG_DIR"
+  mkdir -p "$KCM_CONFIG_DIR"/contexts
+  mkdir -p "$KCM_CONFIG_DIR"/defaults
+
+
+  case $action in 
+    "config")
+      _kcm_setup_config
+      ;;
+    "terminal")
+      _kcm_setup_terminal
+      ;;
+    *)
+      cat << EOF 
+Usage: $0 setup COMMAND
+
+Commands:
+  config      Setup local environment for config manager
+  terminal    Setup local terminal environment
+EOF
+  esac
+  return $?
+}
+
+_kcm_setup_config (){
+  yq e '
+  {
+    "apiVersion": "v1",
+    "kind": "Config",
+    "preferences": {},
+    "clusters": [
+      .configs[] | {
+        "name": .identifier,
+        "cluster": .cluster
+      }
+    ],
+    "users": [
+      .configs[] | {
+        "name": .identifier,
+        "user": .user
+      }
+    ]
+    
+  }
+  ' $KCM_CONFIG > $KCM_CONFIG_DIR/kubeconfig
+
+  return $?
+}
+
+_kcm_setup_terminal (){
+  # if ! _is_sourced; then 
+  #   echo "This method has to be sourced, so we can set the KUBECONFIG env var"
+  #   return 1
+  # fi
+  _kcm_helpers_generate_config
+
+  echo export KUBECONFIG=$KCM_CONFIG_DIR/contexts/"$TID:$KCM_CONFIG_DIR/kubeconfig"
+  return 0
+}
+
+_kcm_config () {
+  local action="$1"
+
+  case $action in 
+    "switch")
+      shift 1
+      _kcm_config_switch $@
+      ;;
+    "get")
+      shift 1
+      _kcm_config_get $@
+      ;;
+    *)
+      if [ ! -z "${action}" ]; then 
+        insert=$(printf "Error: %s config %s not recognized\r\n\r\n\r\n" "$0" "$action")
+      else 
+        insert=""
+      fi
+
+      cat << EOF 
+$insert$0 config COMMAND
+
+Commands:
+  get            List all Configs / Print single config
+  switch         Switch Config
+EOF
+      return 1
+      ;;
+  esac
+
+}
+
+_kcm_config_switch () {
+  local cluster="$1"
+
+  CONFIG=$(yq '.configs[] | select(.identifier == "'"$cluster"'") | .' $KCM_CONFIG)
+  if [ -z "${CONFIG}" ]; then 
+    echo "Config for Cluster \"$cluster\" not found"
+    return 1
+  fi
+  
+  _kcm_helper_set_last_config "$cluster"
+
+  if _kcm_helpers_generate_config; then
+    echo "Now on cluster $(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}') with user $(kubectl auth whoami -o jsonpath='{.status.userInfo.username}' 2>/dev/null || echo "<!! authentication failed !!>" )"
+    return 0
+  else
+    return $?
+  fi
+}
+
+_kcm_config_get () {
+  local config="$1"
+
+  if [ -z "$config" ]; then 
+    _kcm_config_get_all
+  else
+    _kcm_config_get_single $@
+  fi
+
+  return $?
+}
+
+_kcm_config_get_all () {
+  yq -r '(["IDENTIFIER", "TYPE", "SERVER"], (.configs[] | [.identifier, .type, .cluster.server])) | @tsv' "$KCM_CONFIG" | column -t
+}
+
+_kcm_config_get_single () {
+  local config="$1"
+  yq -r '.configs[] | select(.identifier == "'"$config"'")' "$KCM_CONFIG" 
+}
+
+
+_kcm_oauth () {
+  local action="$1"
+
+  if ! _kcm_helper_require_ocpoauth; then 
+    return $?
+  fi
+
+  case $action in 
+    "login")
+      shift 1
+      _kcm_oauth_login $@
+      ;;
+    "change-user")
+      shift 1
+      _kcm_oauth_changeuser $@
+      ;;
+    *)
+      if [ ! -z "${action}" ]; then 
+        insert=$(printf "Error: %s oauth %s not recognized\r\n\r\n\r\n" "$0" "$action")
+      else 
+        insert=""
+      fi
+
+      cat << EOF 
+$insert$0 oauth COMMAND
+
+Commands:
+  login            Login to OpenShift cluster
+  change-user      Switch User in current config
+EOF
+      return 1
+      ;;
+  esac
+
+}
+
+_kcm_oauth_login () {
+  local current_context=$(yq -r '.current-context' "$KCM_CONFIG_DIR/contexts/$TID")
+
+  local o_username=$(yq -r '.configs[] | select(.identifier == "'"$current_context"'") | .username' "$KCM_CONFIG")
+  local apiserver=$(yq -r '.configs[] | select(.identifier == "'"$current_context"'") | .cluster.server' "$KCM_CONFIG")
+  local ca_cert=$(mktemp)
+  yq -r '.configs[] | select(.identifier == "'"$current_context"'") | .cluster.certificate-authority-data' "$KCM_CONFIG" | base64 -d > "$ca_cert"
+  read -sp "Password: " o_password
+  echo 
+
+  local apiserver=$(echo $apiserver | sed 's:/*$::')
+  local oauth_server=$(curl -XGET  "$apiserver/.well-known/oauth-authorization-server" --silent --cacert "$ca_cert" | sed -nE 's/.*"authorization_endpoint": "([^"]*).*/\1/p')
+  
+  if [ -z "${oauth_server}" ]; then 
+    echo "Could not retrieve oauth endpoint from apiserver, aborting login flow"
+    return 1
+  fi
+
+  local headers=$(curl --silent \
+    -u "$o_username:$o_password" \
+    --cacert "$ca_cert" \
+    "$oauth_server?client_id=openshift-challenging-client&response_type=token" \
+    -i)
+
+  local token=$(echo "$headers" | sed -nE 's/^Location:.*access_token=([^&]*)&.*/\1/p' | tr -d '\r')
+
+  if [ -z "${token}" ]; then 
+    rm "$ca_cert"
+    echo "Login failed :( No token received from oauth server."
+    return 1
+  fi
+
+  yq e -i '(.configs[] | select(.identifier == "'"$current_context"'")).user.token = "'"$token"'"' "$KCM_CONFIG"
+
+  echo "Logged in successfully as $(kubectl auth whoami -o jsonpath='{.status.userInfo.username}' 2>/dev/null) "
+
+  rm "$ca_cert"
+  return 0
+}
+
+_kcm_oauth_changeuser () {
+  local o_username="$1"
+
+  if [ -z "${o_username}" ]; then 
+    cat << EOF 
+Error: missing argument USERNAME
+
+Usage: $0 oauth change-user USERNAME
+EOF
+    return 1
+  fi
+
+  local current_context=$(yq -r '.current-context' "$KCM_CONFIG_DIR/contexts/$TID")
+  yq e -i '(.configs[] | select(.identifier == "'"$current_context"'")).username = "'"$o_username"'"' "$KCM_CONFIG"
+
+  _kcm_oauth_login
+  return $?
+}
+
+_kcm_namespace () {
+  local namespace="$1"
+
+  local current_config=$(yq e '.current-context' $KCM_CONFIG_DIR/contexts/"$TID")
+  _kcm_helper_set_last_config "$current_config"
+
+  if ! yq e -i ".namespace = \"$namespace\"" $KCM_CONFIG_DIR/defaults/"$current_config.yaml" 2>/dev/null; then 
+    yq e -n ".namespace = \"$namespace\"" > $KCM_CONFIG_DIR/defaults/"$current_config.yaml"
+  fi
+
+  _kcm_helpers_generate_config
+}
+
+_kcm_completion () {
+  local action="$1"
+
+  case $action in 
+    "zsh")
+      shift 1
+      _kcm_completion_zsh $@
+      ;;
+    *)
+      if [ ! -z "${action}" ]; then 
+        insert=$(printf "Error: %s oauth %s not recognized\r\n\r\n\r\n" "$0" "$action")
+      else 
+        insert=""
+      fi
+
+      cat << EOF 
+$insert$0 completion COMMAND
+
+Commands:
+  zsh            Print zsh completion
+EOF
+      return 1
+      ;;
+  esac
+
+}
+
+_kcm_completion_zsh () {
+  cat << 'EOF' 
+#compdef kcm
+
+_kcm () {
+  KCM_CONFIG_DIR=${KCM_CONFIG_DIR:-~/.kube/config-manager}
+  KCM_CONFIG=${KCM_CONFIG:-$KCM_CONFIG_DIR/config-manager.yaml}
+  TID="$(basename $(tty))" 
+
+  typeset -A opt_args
+
+  if [ "$CURRENT" -eq 2 ]; then
+    local kcm_commands=("completion" "config" "help" "namespace" "oauth" "setup")
+    _describe "kcm_commands" kcm_commands
+    return
+  fi
+
+  case ${words[2]} in
+    "config")
+      if [ "$CURRENT" -ne 3 ]; then
+        case ${words[3]} in
+          "switch" | "get")
+            local configs=($(yq '.configs[] | .identifier' "$KCM_CONFIG"))
+            _describe 'configs' configs
+            return
+            ;;
+          *)
+            return
+            ;;
+        esac
+      fi
+      local config=("get" "switch")
+      _describe 'config' config
+      return
+      ;;
+    "oauth")
+      if [ "$CURRENT" -ne 3 ]; then
+        return
+      fi
+      local oauth=("login" "change-user")
+      _describe 'oauth' oauth
+      return
+      ;;
+    "completion")
+      if [ "$CURRENT" -ne 3 ]; then
+        return
+      fi
+      local completion=("zsh")
+      _describe 'completion' completion
+      return
+      ;;
+    "setup")
+      if [ "$CURRENT" -ne 3 ]; then
+        return
+      fi
+      local setup=("config" "terminal")
+      _describe 'setup' setup
+      return
+      ;;
+    "namespace")
+      if [ "$CURRENT" -ne 3 ]; then
+        return
+      fi
+      local namespaces=($(kubectl get ns -o jsonpath='{.items[*].metadata.name}'))
+      _describe 'namespace' namespaces
+      return
+      ;;
+  esac
+  return
+
+}
+compdef _kcm kcm
+
+EOF
+}
+
+if _is_sourced; then 
+  echo "Don't source this file, it will kill your environment due to exit statements"
+  return 1
+fi
+
+action="$1"
+
+KCM_CONFIG_DIR=${KCM_CONFIG_DIR:-~/.kube/config-manager}
+KCM_CONFIG=${KCM_CONFIG:-$KCM_CONFIG_DIR/config-manager.yaml}
+TID="$(basename $(tty))" 
+
+case "$action" in 
+  "config")
+    shift 1
+    _kcm_config $@
+    exit_code=$?
+    ;;
+  "oauth")
+    shift 1
+    _kcm_oauth $@
+    exit_code=$?
+    ;;
+  "setup")
+    shift 1
+    _kcm_setup $@
+    exit_code=$?
+
+    # Workaround so we don't kill our shell on startup later
+    if _is_sourced && [ "$1" = "terminal" ]; then 
+      return $exit_code
+    fi
+    ;;
+  "namespace")
+    shift 1
+    _kcm_namespace $@
+    exit_code=$?
+    ;;
+  "completion")
+    shift 1
+    _kcm_completion $@
+    exit_code=$?
+    ;;
+  *)
+    cat << EOF
+KCM - Kube Config Manager
+
+Usage: $0 COMMAND
+
+Commands:
+  config        All commands related to managing/switching configs
+  completion    Print completion scripts
+  namespace     Switch Namespace
+  oauth         Interact with OpenShift oauth
+  setup         Initialize your workspace
+  help          Displays this message
+EOF
+    exit 1
+    ;;
+esac
+
+exit $exit_code
