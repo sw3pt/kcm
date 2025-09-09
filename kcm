@@ -270,6 +270,8 @@ _kcm_oauth_login () {
 
   yq e -i '(.configs[] | select(.identifier == "'"$current_context"'")).user.token = "'"$token"'"' "$KCM_CONFIG"
 
+  _kcm_setup_config
+
   echo "Logged in successfully as $(kubectl auth whoami -o jsonpath='{.status.userInfo.username}' 2>/dev/null) "
 
   rm "$ca_cert"
