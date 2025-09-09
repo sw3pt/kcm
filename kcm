@@ -399,7 +399,7 @@ _kcm () {
       if [ "$CURRENT" -ne 3 ]; then
         return
       fi
-      local namespaces=($(kubectl get ns -o jsonpath='{.items[*].metadata.name}'))
+      local namespaces=($(kubectl get ns -o jsonpath='{.items[*].metadata.name}' >/dev/null 2>&1))
       _describe 'namespace' namespaces
       return
       ;;
