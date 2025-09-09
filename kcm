@@ -22,7 +22,7 @@ _kcm_helpers_generate_config () {
   local LAST_CONFIG=$(yq e '.last-config' $KCM_CONFIG)
 
   if [ "${LAST_CONFIG}" == "null" ] || [ -z "${LAST_CONFIG}" ]; then 
-    local first_config=$(yq e 'configs[0].identifier' $KCM_CONFIG)
+    local first_config=$(yq e '.configs[0].identifier' $KCM_CONFIG)
     if [ "${first_config}" == "null" ] || [ -z "${first_config}" ]; then 
       echo "Error, KCM Config last-config not defined :("
       return 1
