@@ -37,7 +37,7 @@ ENV Vars:
 
 To setup your terminal add the following to your `.zshrc`:
 ```
-source <("$MYZSH"/plugin/kcm/kcm setup terminal)
+source <(kcm setup terminal)
 ```
 That sets your `$KUBECONFIG` to the correct locations. And creates a kubeconfig for the current terminal.
 
