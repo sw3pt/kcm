@@ -243,21 +243,27 @@ _kcm_oauth_login () {
   local o_username=$(yq -r '.configs[] | select(.identifier == "'"$current_context"'") | .username' "$KCM_CONFIG")
   local apiserver=$(yq -r '.configs[] | select(.identifier == "'"$current_context"'") | .cluster.server' "$KCM_CONFIG")
   local ca_cert=$(mktemp)
-  yq -r '.configs[] | select(.identifier == "'"$current_context"'") | .cluster.certificate-authority-data' "$KCM_CONFIG" | base64 -d > "$ca_cert"
+  yq -r '.configs[] | select(.identifier == "'"$current_context"'") | .cluster.certificate-authority-data  // "" | @base64d' "$KCM_CONFIG" | sed '/^$/d' > "$ca_cert"
   read -sp "Password: " o_password
-  echo 
+  echo ""
+  local curl_opts=(-s -u "$o_username:$o_password")
+
+  if [[ -s "$ca_cert" ]]; then
+    curl_opts+=(--cacert "$ca_cert")
+  fi
+  curl_opts+=(--silent)
+
 
   local apiserver=$(echo $apiserver | sed 's:/*$::')
-  local oauth_server=$(curl -XGET  "$apiserver/.well-known/oauth-authorization-server" --silent --cacert "$ca_cert" | sed -nE 's/.*"authorization_endpoint": "([^"]*).*/\1/p')
-  
+  local oauth_server=$(curl -XGET "${curl_opts[@]}" "$apiserver/.well-known/oauth-authorization-server" | sed -nE 's/.*"authorization_endpoint": "([^"]*).*/\1/p')
   if [ -z "${oauth_server}" ]; then 
-    echo "Could not retrieve oauth endpoint from apiserver, aborting login flow"
+    curl -v -XGET "${curl_opts[@]}" "$apiserver/.well-known/oauth-authorization-server" 2>&1 | grep "SSL certificate problem"
+    echo "Could not retrieve oauth endpoint from apiserver (\"$apiserver/.well-known/oauth-authorization-server\"), aborting login flow."
     return 1
   fi
-
-  local headers=$(curl --silent \
+  
+  local headers=$(curl "${curl_opts[@]}" \
     -u "$o_username:$o_password" \
-    --cacert "$ca_cert" \
     "$oauth_server?client_id=openshift-challenging-client&response_type=token" \
     -i)
 
