@@ -421,7 +421,10 @@ action="$1"
 
 KCM_CONFIG_DIR=${KCM_CONFIG_DIR:-~/.kube/config-manager}
 KCM_CONFIG=${KCM_CONFIG:-$KCM_CONFIG_DIR/config-manager.yaml}
-TID="$(basename $(tty))" 
+TID="$(basename $(tty))"
+if [ -z "${TID}"]; then 
+  TID="undefined"
+fi
 
 case "$action" in 
   "config")
