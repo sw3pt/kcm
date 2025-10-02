@@ -51,6 +51,7 @@ _kcm_helpers_generate_config () {
     
   }
   ' $KCM_CONFIG > $KCM_CONFIG_DIR/contexts/"$TID"
+  cp $KCM_CONFIG_DIR/contexts/"$TID" $KCM_CONFIG_DIR/contexts/undefined
   return $?
 }
 
