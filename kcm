@@ -255,7 +255,7 @@ _kcm_oauth_login () {
 
 
   local apiserver=$(echo $apiserver | sed 's:/*$::')
-  local oauth_server=$(curl -XGET "${curl_opts[@]}" "$apiserver/.well-known/oauth-authorization-server" | sed -nE 's/.*"authorization_endpoint": "([^"]*).*/\1/p')
+  local oauth_server=$(curl -XGET "${curl_opts[@]}" "$apiserver/.well-known/oauth-authorization-server" | sed -nE 's/.*"authorization_endpoint": {0,1}"([^"]*).*/\1/p')
   if [ -z "${oauth_server}" ]; then 
     curl -v -XGET "${curl_opts[@]}" "$apiserver/.well-known/oauth-authorization-server" 2>&1 | grep "SSL certificate problem"
     echo "Could not retrieve oauth endpoint from apiserver (\"$apiserver/.well-known/oauth-authorization-server\"), aborting login flow."
