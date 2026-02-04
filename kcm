@@ -51,7 +51,7 @@ _kcm_helpers_generate_config () {
     
   }
   ' $KCM_CONFIG > $KCM_CONFIG_DIR/contexts/"$TID"
-  if [ -n "KCM_ARGOCD_ENABLE" ]; then 
+  if [ -n "$KCM_ARGOCD_ENABLE" ]; then 
     yq e '
     {
       "apiVersion": "v1",
@@ -147,7 +147,7 @@ _kcm_setup_terminal (){
   _kcm_helpers_generate_config
 
   echo export KUBECONFIG=$KCM_CONFIG_DIR/contexts/"$TID:$KCM_CONFIG_DIR/kubeconfig"
-  if [ -n "KCM_ARGOCD_ENABLE" ]; then 
+  if [ -n "$KCM_ARGOCD_ENABLE" ]; then 
     echo export KUBECONFIG_ARGOCD=$KCM_CONFIG_DIR/contexts/"$TID:$KCM_CONFIG_DIR/kubeconfig"
   fi
 
