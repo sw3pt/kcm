@@ -70,7 +70,7 @@ _kcm_helpers_generate_config () {
       "current-context": "'"$LAST_CONFIG"'"
       
     }
-    ' $KCM_CONFIG > $KCM_CONFIG_DIR/contexts/"$TID"
+    ' $KCM_CONFIG > $KCM_CONFIG_DIR/contexts/"$TID"-argocd
   fi
 
   cp $KCM_CONFIG_DIR/contexts/"$TID" $KCM_CONFIG_DIR/contexts/undefined
@@ -148,7 +148,7 @@ _kcm_setup_terminal (){
 
   echo export KUBECONFIG=$KCM_CONFIG_DIR/contexts/"$TID:$KCM_CONFIG_DIR/kubeconfig"
   if [ -n "$KCM_ARGOCD_ENABLE" ]; then 
-    echo export KUBECONFIG_ARGOCD=$KCM_CONFIG_DIR/contexts/"$TID:$KCM_CONFIG_DIR/kubeconfig"
+    echo export KUBECONFIG_ARGOCD=$KCM_CONFIG_DIR/contexts/"$TID-argocd:$KCM_CONFIG_DIR/kubeconfig"
   fi
 
   return 0
